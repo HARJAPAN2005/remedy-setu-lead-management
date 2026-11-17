@@ -1,223 +1,261 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import styles from "./page.module.css";
-import LoadingAnimation from "./components/LoadingAnimation";
-import ThankYouPage from "./components/ThankYouPage";
-import JsonLd from "./components/JsonLd";
+import { useState } from 'react';
+import styles from './page.module.css';
 
-export default function Home() {
-  const [formData, setFormData] = useState({
-    name: "",
-    email: "",
-    phone: "",
-    message: "",
+const PRODUCTS = ['Gemstones', 'Rudraksha', 'Puja Services', 'Other'];
+const BUSINESS_TYPES = ['Astrologer', 'Retailer', 'Distributor', 'Other'];
+
+function SuccessPage() {
+  return (
+    <div className={styles.successContainer}>
+      <div className={styles.successCard}>
+        <div className={styles.successIcon}>✦</div>
+        <h2 className={styles.successTitle}>Enquiry Submitted!</h2>
+        <p className={styles.successText}>
+          Thank you for your interest in partnering with Remedy Setu. Our team will
+          review your enquiry and reach out to you within 1–2 business days.
+        </p>
+        <p className={styles.successSub}>
+          <em>May your journey be blessed with prosperity.</em>
+        </p>
+      </div>
+    </div>
+  );
+}
+
+export default function HomePage() {
+  const [form, setForm] = useState({
+    name: '',
+    phone: '',
+    city: '',
+    businessType: '',
+    productsInterested: [],
+    message: '',
   });
-  
-  const [formState, setFormState] = useState({
-    view: "form", // 'form', 'loading', or 'thankYou'
-    error: false,
-    errorMessage: "",
-    wasUpdated: false,
-  });
+  const [errors, setErrors] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [serverError, setServerError] = useState('');
 
-  const handleChange = (e) => {
+  function handleChange(e) {
     const { name, value } = e.target;
-    setFormData((prevData) => ({
-      ...prevData,
-      [name]: value,
-    }));
-  };
+    setForm((f) => ({ ...f, [name]: value }));
+    setErrors((er) => ({ ...er, [name]: '' }));
+  }
 
-  const handleSubmit = async (e) => {
+  function handleCheckbox(product) {
+    setForm((f) => {
+      const already = f.productsInterested.includes(product);
+      return {
+        ...f,
+        productsInterested: already
+          ? f.productsInterested.filter((p) => p !== product)
+          : [...f.productsInterested, product],
+      };
+    });
+    setErrors((er) => ({ ...er, productsInterested: '' }));
+  }
+
+  function validate() {
+    const e = {};
+    if (!form.name.trim()) e.name = 'Full name is required.';
+    if (!form.phone.trim()) e.phone = 'Phone number is required.';
+    if (!form.city.trim()) e.city = 'City is required.';
+    if (!form.businessType) e.businessType = 'Please select a business type.';
+    if (form.productsInterested.length === 0)
+      e.productsInterested = 'Please select at least one product.';
+    return e;
+  }
+
+  async function handleSubmit(e) {
     e.preventDefault();
-    setFormState({
-      ...formState,
-      view: "loading",
-      error: false,
-      errorMessage: "",
-    });
-
-    try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/leads`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(formData),
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to submit form");
-      }
-
-      const data = await response.json();
-      
-      // Determine if this was an update or a new submission
-      const wasUpdated = response.status === 200;
-      
-      // Simulate a slight delay for better UX
-      setTimeout(() => {
-        setFormState({
-          ...formState,
-          view: "thankYou",
-          error: false,
-          wasUpdated: wasUpdated,
-        });
-      }, 1000);
-      
-    } catch (error) {
-      console.error("Error submitting form:", error);
-      setFormState({
-        ...formState,
-        view: "form",
-        error: true,
-        errorMessage: "Something went wrong. Please try again later.",
-      });
+    setServerError('');
+    const errs = validate();
+    if (Object.keys(errs).length > 0) {
+      setErrors(errs);
+      return;
     }
-  };
-  
-  const resetForm = () => {
-    setFormData({
-      name: "",
-      email: "",
-      phone: "",
-      message: "",
-    });
-    setFormState({
-      view: "form",
-      error: false,
-      errorMessage: "",
-      wasUpdated: false,
-    });
-  };
+    setLoading(true);
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/leads`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      });
+      if (res.ok) {
+        setSubmitted(true);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setServerError(data.message || 'Submission failed. Please try again.');
+      }
+    } catch (err) {
+      setServerError('Network error. Please check your connection and try again.');
+    } finally {
+      setLoading(false);
+    }
+  }
 
-  const renderFormContent = () => {
-    switch (formState.view) {
-      case "loading":
-        return <LoadingAnimation />;
-      case "thankYou":
-        return <ThankYouPage 
-          onReset={resetForm} 
-          wasUpdated={formState.wasUpdated} 
-        />;
-      case "form":
-      default:
-        return (
-          <form onSubmit={handleSubmit} className={styles.form}>
-            <div className={styles.formGroup}>
-              <label htmlFor="name">Full Name *</label>
+  if (submitted) return <SuccessPage />;
+
+  return (
+    <main className={styles.main}>
+      <div className={styles.container}>
+        {/* Header */}
+        <header className={styles.header}>
+          <div className={styles.brandMark}>✦</div>
+          <h1 className={styles.brandName}>Remedy Setu</h1>
+          <p className={styles.brandTagline}>Connecting Sacred Traditions with Modern Business</p>
+        </header>
+
+        {/* Form Card */}
+        <div className={styles.card}>
+          <div className={styles.cardHeader}>
+            <h2 className={styles.formTitle}>Partner Enquiry Form</h2>
+            <p className={styles.formSubtitle}>
+              Register your interest in becoming a partner for Gemstones, Rudraksha &amp; Puja Services.
+            </p>
+          </div>
+
+          <form onSubmit={handleSubmit} noValidate className={styles.form}>
+            {/* Full Name */}
+            <div className={styles.fieldGroup}>
+              <label className={styles.label} htmlFor="name">
+                Full Name <span className={styles.required}>*</span>
+              </label>
               <input
-                type="text"
                 id="name"
                 name="name"
-                value={formData.name}
+                type="text"
+                value={form.name}
                 onChange={handleChange}
-                required
                 placeholder="Your full name"
-                className={styles.input}
+                className={`${styles.input} ${errors.name ? styles.inputError : ''}`}
+                autoComplete="name"
               />
+              {errors.name && <span className={styles.errorMsg}>{errors.name}</span>}
             </div>
 
-            <div className={styles.formGroup}>
-              <label htmlFor="email">Email Address *</label>
+            {/* Phone */}
+            <div className={styles.fieldGroup}>
+              <label className={styles.label} htmlFor="phone">
+                Phone Number <span className={styles.required}>*</span>
+              </label>
               <input
-                type="email"
-                id="email"
-                name="email"
-                value={formData.email}
-                onChange={handleChange}
-                required
-                placeholder="Your email address"
-                className={styles.input}
-              />
-            </div>
-
-            <div className={styles.formGroup}>
-              <label htmlFor="phone">Phone Number *</label>
-              <input
-                type="tel"
                 id="phone"
                 name="phone"
-                value={formData.phone}
+                type="text"
+                value={form.phone}
                 onChange={handleChange}
-                required
-                placeholder="Your phone number"
-                className={styles.input}
+                placeholder="10-digit mobile number"
+                className={`${styles.input} ${errors.phone ? styles.inputError : ''}`}
+                autoComplete="tel"
+                inputMode="numeric"
               />
+              {errors.phone && <span className={styles.errorMsg}>{errors.phone}</span>}
             </div>
 
-            <div className={styles.formGroup}>
-              <label htmlFor="message">Tell us about your availability (optional)</label>
+            {/* City */}
+            <div className={styles.fieldGroup}>
+              <label className={styles.label} htmlFor="city">
+                City <span className={styles.required}>*</span>
+              </label>
+              <input
+                id="city"
+                name="city"
+                type="text"
+                value={form.city}
+                onChange={handleChange}
+                placeholder="Your city"
+                className={`${styles.input} ${errors.city ? styles.inputError : ''}`}
+                autoComplete="address-level2"
+              />
+              {errors.city && <span className={styles.errorMsg}>{errors.city}</span>}
+            </div>
+
+            {/* Business Type */}
+            <div className={styles.fieldGroup}>
+              <label className={styles.label} htmlFor="businessType">
+                Business Type <span className={styles.required}>*</span>
+              </label>
+              <select
+                id="businessType"
+                name="businessType"
+                value={form.businessType}
+                onChange={handleChange}
+                className={`${styles.select} ${errors.businessType ? styles.inputError : ''}`}
+              >
+                <option value="">— Select business type —</option>
+                {BUSINESS_TYPES.map((bt) => (
+                  <option key={bt} value={bt}>{bt}</option>
+                ))}
+              </select>
+              {errors.businessType && <span className={styles.errorMsg}>{errors.businessType}</span>}
+            </div>
+
+            {/* Products Interested */}
+            <div className={styles.fieldGroup}>
+              <label className={styles.label}>
+                Products Interested In <span className={styles.required}>*</span>
+              </label>
+              <div className={styles.checkboxGrid}>
+                {PRODUCTS.map((product) => (
+                  <label key={product} className={styles.checkboxLabel}>
+                    <input
+                      type="checkbox"
+                      checked={form.productsInterested.includes(product)}
+                      onChange={() => handleCheckbox(product)}
+                      className={styles.checkbox}
+                    />
+                    <span className={styles.checkboxText}>{product}</span>
+                  </label>
+                ))}
+              </div>
+              {errors.productsInterested && (
+                <span className={styles.errorMsg}>{errors.productsInterested}</span>
+              )}
+            </div>
+
+            {/* Message */}
+            <div className={styles.fieldGroup}>
+              <label className={styles.label} htmlFor="message">
+                Additional Message <span className={styles.optional}>(optional)</span>
+              </label>
               <textarea
                 id="message"
                 name="message"
-                value={formData.message}
+                value={form.message}
                 onChange={handleChange}
-                placeholder="Your availability and any questions you have"
+                placeholder="Tell us about your business, requirements, or any questions you have..."
+                rows={4}
                 className={styles.textarea}
-                rows="4"
-              ></textarea>
+              />
             </div>
 
+            {/* Server error */}
+            {serverError && (
+              <div className={styles.serverError}>{serverError}</div>
+            )}
+
+            {/* Submit */}
             <button
               type="submit"
-              className={styles.submitButton}
-              disabled={formState.view === "loading"}
+              disabled={loading}
+              className={`${styles.submitBtn} ${loading ? styles.submitBtnLoading : ''}`}
             >
-              Submit Application
+              {loading ? (
+                <span className={styles.spinner} aria-label="Submitting..." />
+              ) : (
+                'Submit Enquiry ✦'
+              )}
             </button>
-
-            {formState.error && (
-              <p className={styles.errorMessage}>{formState.errorMessage}</p>
-            )}
           </form>
-        );
-    }
-  };
+        </div>
 
-  const jsonLdData = {
-    "@context": "https://schema.org",
-    "@type": "JobPosting",
-    "title": "Part-Time Job Opportunity",
-    "description": "Apply for our flexible part-time positions and earn money in your spare time.",
-    "datePosted": new Date().toISOString(),
-    "employmentType": "PART_TIME",
-    "hiringOrganization": {
-      "@type": "Organization",
-      "name": "Job Lead Form",
-      "url": "https://leadform.onrender.com"
-    }
-  };
-
-  return (
-    <>
-      <JsonLd data={jsonLdData} />
-      <div className={styles.page}>
-        <main className={styles.main}>
-          <h1 className={styles.title}>WANT TO EARN MONEY IN A PART-TIME JOB?</h1>
-          <p className={styles.description}>
-            Fill out the form below to request information from our HR team about exciting part-time opportunities.
-          </p>
-
-          <div className={styles.formContainer}>
-            {renderFormContent()}
-          </div>
-        </main>
         <footer className={styles.footer}>
-          <p className={styles.copyright}>
-            &copy; {new Date().getFullYear()} Swaraj Puppalwar | 
-            <a 
-              href="https://github.com/UltronTheAI"
-              target="_blank"
-              rel="noopener noreferrer"
-              className={styles.developerLink}
-            >
-              UltronTheAI
-            </a>
-          </p>
+          <p>© {new Date().getFullYear()} Remedy Setu. All rights reserved.</p>
         </footer>
       </div>
-    </>
+    </main>
   );
 }

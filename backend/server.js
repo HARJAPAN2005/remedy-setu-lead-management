@@ -1,7 +1,6 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-const jwt = require('jsonwebtoken');
 const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
@@ -25,31 +24,53 @@ mongoose.connect(process.env.MONGO_URI, {
     process.exit(1);
   });
 
-// Define Schema for Leads
+// ── Schemas ────────────────────────────────────────────────────────────────────
+
+const noteSchema = new mongoose.Schema({
+  text: { type: String, required: true },
+  createdAt: { type: Date, default: Date.now }
+});
+
 const leadSchema = new mongoose.Schema({
   name: { type: String, required: true },
-  email: { type: String, required: true, unique: true },
-  phone: { type: String, required: false },
-  message: { type: String, required: false },
+  phone: { type: String, required: true },
+  city: { type: String, required: true },
+  businessType: {
+    type: String,
+    enum: ['Astrologer', 'Retailer', 'Distributor', 'Other'],
+    required: true
+  },
+  productsInterested: [{
+    type: String,
+    enum: ['Gemstones', 'Rudraksha', 'Puja Services', 'Other']
+  }],
+  message: { type: String },
+  status: {
+    type: String,
+    enum: ['New', 'Contacted', 'Quoted', 'Won', 'Lost'],
+    default: 'New'
+  },
+  notes: [noteSchema],
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
 });
 
-// Create models
+// Create model
 const Lead = mongoose.model('Lead', leadSchema, 'Leads');
 
-// Verify Token Middleware
+// ── Verify Token Middleware ────────────────────────────────────────────────────
+
 const verifyToken = (req, res, next) => {
   // Get auth header value
   const bearerHeader = req.headers['authorization'];
-  
+
   // Check if bearer is undefined
   if (typeof bearerHeader !== 'undefined') {
     // Split at the space
     const bearer = bearerHeader.split(' ');
     // Get token from array
     const bearerToken = bearer[1];
-    
+
     // Directly compare with TOKEN_SECRET
     if (bearerToken === process.env.TOKEN_SECRET) {
       next();
@@ -62,37 +83,20 @@ const verifyToken = (req, res, next) => {
   }
 };
 
-// Sample route for testing
-app.get('/', (req, res) => {
-  res.send('LeadForm API is running');
-});
+// ── Public Routes ─────────────────────────────────────────────────────────────
 
-// Routes for Leads
+// POST /api/leads — create a new lead (no auth required)
 app.post('/api/leads', async (req, res) => {
   try {
-    const { email } = req.body;
+    const { name, phone, city, businessType } = req.body;
 
-    // Check if lead with this email already exists
-    const existingLead = await Lead.findOne({ email });
-
-    if (existingLead) {
-      // If email exists, update the existing record
-      const updatedLead = await Lead.findOneAndUpdate(
-        { email },
-        { 
-          ...req.body,
-          updatedAt: Date.now() // Add an updatedAt field to track when it was updated
-        },
-        { new: true, runValidators: true } // Return the updated document and run validators
-      );
-      
-      return res.status(200).json({ 
-        ...updatedLead.toObject(), 
-        message: 'Lead information updated successfully' 
+    // Server-side validation of required fields
+    if (!name || !phone || !city || !businessType) {
+      return res.status(400).json({
+        message: 'Missing required fields: name, phone, city, and businessType are required.'
       });
     }
 
-    // If email doesn't exist, create a new lead
     const newLead = new Lead(req.body);
     const savedLead = await newLead.save();
     res.status(201).json(savedLead);
@@ -101,21 +105,128 @@ app.post('/api/leads', async (req, res) => {
   }
 });
 
-// Protected route - requires token
+// POST /api/verify-token — token verification (no auth required)
+app.post('/api/verify-token', (req, res) => {
+  try {
+    const { token } = req.body;
+
+    if (!token) {
+      return res.status(400).json({ valid: false, message: 'Token is required' });
+    }
+
+    // Direct comparison with TOKEN_SECRET
+    const isValid = token === process.env.TOKEN_SECRET;
+
+    if (isValid) {
+      return res.status(200).json({ valid: true, message: 'Token is valid' });
+    } else {
+      return res.status(200).json({ valid: false, message: 'Invalid token' });
+    }
+  } catch (error) {
+    console.error('Token verification error:', error);
+    res.status(500).json({ valid: false, message: 'Internal server error' });
+  }
+});
+
+// ── Protected Routes ──────────────────────────────────────────────────────────
+
+// GET /api/leads/stats — lead counts by status (must be before /:id routes)
+app.get('/api/leads/stats', verifyToken, async (req, res) => {
+  try {
+    const [total, newCount, contacted, quoted, won, lost] = await Promise.all([
+      Lead.countDocuments(),
+      Lead.countDocuments({ status: 'New' }),
+      Lead.countDocuments({ status: 'Contacted' }),
+      Lead.countDocuments({ status: 'Quoted' }),
+      Lead.countDocuments({ status: 'Won' }),
+      Lead.countDocuments({ status: 'Lost' }),
+    ]);
+
+    res.status(200).json({ total, new: newCount, contacted, quoted, won, lost });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// GET /api/leads — return all leads sorted by createdAt desc
 app.get('/api/leads', verifyToken, async (req, res) => {
   try {
-    const leads = await Lead.find();
+    const leads = await Lead.find().sort({ createdAt: -1 });
     res.status(200).json(leads);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 });
 
-// Delete lead endpoint - requires token
+// PATCH /api/leads/:id/status — update lead status
+app.patch('/api/leads/:id/status', verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    const validStatuses = ['New', 'Contacted', 'Quoted', 'Won', 'Lost'];
+    if (!status || !validStatuses.includes(status)) {
+      return res.status(400).json({
+        message: `Invalid status. Must be one of: ${validStatuses.join(', ')}`
+      });
+    }
+
+    const updatedLead = await Lead.findByIdAndUpdate(
+      id,
+      { status, updatedAt: Date.now() },
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedLead) {
+      return res.status(404).json({ message: 'Lead not found' });
+    }
+
+    res.status(200).json(updatedLead);
+  } catch (error) {
+    if (error.name === 'CastError') {
+      return res.status(400).json({ message: 'Invalid lead ID format' });
+    }
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// POST /api/leads/:id/notes — add a note to a lead
+app.post('/api/leads/:id/notes', verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { text } = req.body;
+
+    if (!text) {
+      return res.status(400).json({ message: 'Note text is required' });
+    }
+
+    const updatedLead = await Lead.findByIdAndUpdate(
+      id,
+      {
+        $push: { notes: { text } },
+        updatedAt: Date.now()
+      },
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedLead) {
+      return res.status(404).json({ message: 'Lead not found' });
+    }
+
+    res.status(200).json(updatedLead);
+  } catch (error) {
+    if (error.name === 'CastError') {
+      return res.status(400).json({ message: 'Invalid lead ID format' });
+    }
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// DELETE /api/leads/:id — delete a lead
 app.delete('/api/leads/:id', verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     if (!id) {
       return res.status(400).json({ message: 'Lead ID is required' });
     }
@@ -128,44 +239,22 @@ app.delete('/api/leads/:id', verifyToken, async (req, res) => {
 
     // Delete the lead
     await Lead.findByIdAndDelete(id);
-    
+
     res.status(200).json({ message: 'Lead deleted successfully' });
   } catch (error) {
     console.error('Error deleting lead:', error);
-    
+
     // Handle invalid ID format
     if (error.name === 'CastError') {
       return res.status(400).json({ message: 'Invalid lead ID format' });
     }
-    
+
     res.status(500).json({ message: 'Error deleting lead', error: error.message });
   }
 });
 
-// Token verification endpoint
-app.post('/api/verify-token', (req, res) => {
-  try {
-    const { token } = req.body;
-    
-    if (!token) {
-      return res.status(400).json({ valid: false, message: 'Token is required' });
-    }
-    
-    // Direct comparison with TOKEN_SECRET
-    const isValid = token === process.env.TOKEN_SECRET;
-    
-    if (isValid) {
-      return res.status(200).json({ valid: true, message: 'Token is valid' });
-    } else {
-      return res.status(200).json({ valid: false, message: 'Invalid token' });
-    }
-  } catch (error) {
-    console.error('Token verification error:', error);
-    res.status(500).json({ valid: false, message: 'Internal server error' });
-  }
-});
+// ── Static File Routes ────────────────────────────────────────────────────────
 
-// Instead of using a wildcard, set specific routes for frontend pages
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'out', 'index.html'));
 });
@@ -180,30 +269,27 @@ app.use((req, res, next) => {
   if (req.url.startsWith('/api')) {
     return next();
   }
-  
+
   // Clean up URL to prevent path traversal
   const cleanUrl = req.url.split('?')[0]; // Remove query parameters
-  
+
   // Try to serve the file directly first
   const filePath = path.join(__dirname, 'out', cleanUrl);
-  
-  // Use try-catch with synchronous fs.existsSync for better error handling
+
   try {
     if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
-      // File exists, serve it
       return res.sendFile(filePath);
     }
-    
-    // File doesn't exist, serve index.html
+
     return res.sendFile(path.join(__dirname, 'out', 'index.html'));
   } catch (error) {
     console.error('Error serving static file:', error);
-    // In case of any error, default to index.html
     return res.sendFile(path.join(__dirname, 'out', 'index.html'));
   }
 });
 
-// Start the server
+// ── Start Server ──────────────────────────────────────────────────────────────
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
